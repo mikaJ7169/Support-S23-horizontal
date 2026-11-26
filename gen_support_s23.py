@@ -1,74 +1,71 @@
 #!/usr/bin/env python3
 """
-Support horizontal (paysage) pour Samsung Galaxy S23 -> fichier STL (unites : mm).
+Support horizontal (paysage) pour Samsung Galaxy S23 -> STL (mm).  v3
 
-Cotes officielles Galaxy S23 : 146.3 x 70.9 x 7.6 mm, ecran 6.1" 2340x1080 (19.5:9).
-Layout : port USB-C au centre du bord inferieur, boutons volume + power sur le
-bord droit (partie haute), tiroir SIM sur le bord inferieur a gauche de l'USB-C,
-micro sur le bord superieur, 3 capteurs photo en haut a gauche du dos.
+Cotes officielles Galaxy S23 : 146.3 x 70.9 x 7.6 mm, ecran 6.1" 2340x1080
+(19.5:9), coins du chassis ~ r11 mm (design identique au S22).
+Layout : USB-C au centre du bord inferieur, boutons volume + power sur le bord
+droit (partie haute), tiroir SIM + enceinte sur le bord inferieur, micro sur le
+bord superieur, capteurs photo en haut a gauche du dos.
 
-Orientation choisie : le bord inferieur du telephone (USB-C) fait face a la
-GAUCHE du support -> charge par la gauche. Apres rotation paysage :
-  - paroi gauche du support  = bord USB-C / enceinte / SIM du telephone
-  - paroi basse du support   = bord des boutons (volume + power)
-  - paroi droite             = bord superieur (micro)
-  - paroi haute              = bord gauche (rien)
-  - capteurs photo (dos)     = coin bas-droit du fond
+v3 :
+  - en regardant l'ECRAN, le port USB-C est a GAUCHE du support (+X)
+  - le berceau est incline de 10 deg vers l'arriere -> le telephone repose
+    contre le fond et ne peut pas tomber vers l'avant
+  - le bas du telephone est a 80 mm du sol, le cable USB peut passer SOUS
+  - la cavite a des coins arrondis (r12.5) qui suivent la courbe du telephone
+  - insertion du telephone par le dessus (ouverture superieure)
+  - corps/colonnes/embase entierement arrondis (aucun coin saillant)
 
-Le telephone est "anglobe" : fond plein + 4 parois + baguette frontale qui
-recouvre 3 mm tout autour -> seul l'ecran depasse.
+Repere local avant inclinaison : X = longueur du tel, Y = epaisseur (ecran
+vers +Y), Z = largeur du tel. +X = cote USB-C = GAUCHE vue de l'ecran.
 """
 
 import numpy as np
 import trimesh
-from trimesh.creation import box as tbox, extrude_polygon
+from trimesh.creation import box as tbox, cylinder, icosphere, extrude_polygon
 from trimesh.transformations import translation_matrix, rotation_matrix
 from shapely.geometry import box as sbox
 
 # ---------------- Telephone (mm) ----------------
-PHONE_L = 146.3   # longueur -> axe X du support (paysage)
-PHONE_W = 70.9    # largeur  -> axe Z du support
-PHONE_T = 7.6     # epaisseur-> axe Y du support
+PHONE_L = 146.3
+PHONE_W = 70.9
+PHONE_T = 7.6
+R_PHONE = 11.0     # rayon des coins du chassis
 
-# ---------------- Parametres du support (mm) ----------------
-CLEAR  = 0.5    # jeu autour du telephone
-WALL   = 4.0    # epaisseur parois
-BACK   = 5.0    # epaisseur du fond
-LIP_T  = 4.0    # epaisseur baguette frontale
-LIP    = 3.0    # recouvrement frontal (maintien)
-BOT    = 6.0    # hauteur paroi basse (le telephone repose dessus)
-FOOT_D = 34.0   # profondeur de l'embase vers l'arriere
-R_OUT  = 6.0    # rayon coins exterieurs
-R_WIN  = 6.0    # rayon coins de la fenetre ecran
+# ---------------- Parametres (mm / deg) ----------------
+CLEAR  = 0.5
+WALL   = 4.0
+BACK   = 5.0
+LIP_T  = 4.0
+LIP    = 3.0
+BOT    = 6.0       # epaisseur du seuil
+RAISE  = 80.0      # hauteur du bas du telephone au-dessus du sol
+TILT   = 10.0      # inclinaison vers l'arriere
+FOOT_D = 34.0
+COL_W  = 20.0
+ZB     = -90.0    # base des colonnes en repere local (sera coupee au niveau du sol)
+R_BODY = 6.0
+R_CAV  = R_PHONE + 1.5   # 12.5 : suit la courbe des coins du tel
+R_WIN  = 9.0             # coins de la fenetre (coins de l'ecran ~ r8)
 
-# ---------------- Geometrie derivee ----------------
-cav_x = PHONE_L + 2 * CLEAR                 # 147.3
-cav_z = PHONE_W + 2 * CLEAR                 # 71.9
-cav_y = PHONE_T + 2 * CLEAR                 # 8.6
-body_x = cav_x + 2 * WALL                   # 155.3
-body_z = BOT + cav_z + WALL                 # 81.9
-body_y = BACK + cav_y + LIP_T               # 17.6
-zc = BOT + cav_z / 2                        # centre vertical de la cavite (41.95)
-win_x = cav_x - 2 * LIP                     # 141.3
-win_z = cav_z - 2 * LIP                     # 65.9
-
-# Ouvertures (x0,x1,y0,y1,z0,z1)
-USB_CUT = (-78.5, -72.5, -1.0, body_y + 1, 23.0, 61.0)   # passage cable USB-C (38 mm de haut, toute la profondeur)
-BTN_CUT = (-10.0, 74.5, -1.0, body_y + 1, -1.0, BOT + 0.2)  # logement boutons volume/power (paroi basse, cote droit)
-MIC_R   = (body_x / 2 - 5.0, body_x / 2 + 1.0, -1.0, body_y + 1, zc - 4.0, zc + 4.0)  # micro bord superieur du tel
-MIC_T   = (-6.0, 6.0, -1.0, body_y + 1, body_z - 5.0, body_z + 1.0)                    # bord gauche du tel
-CAM     = (40.0, cav_x / 2, BACK - 2.6, BACK + 0.2, BOT, BOT + 16.0)  # poche capteurs photo (coin bas-droit du fond)
+cav_x = PHONE_L + 2 * CLEAR            # 147.3
+cav_y = PHONE_T + 2 * CLEAR            # 8.6
+cav_z = PHONE_W + 2 * CLEAR            # 71.9
+body_x = cav_x + 2 * WALL              # 155.3
+body_y = BACK + cav_y + LIP_T          # 17.6
+body_z = BOT + cav_z + WALL            # 81.9
+zc = BOT + cav_z / 2                   # 41.95 centre de la cavite
+win_x = cav_x - 2 * LIP                # 141.3
 
 
 def rrect(w, h, r):
-    """Polygone rectangle arrondi w x h, rayon r, centre a l'origine."""
     return sbox(-w / 2, -h / 2, w / 2, h / 2).buffer(r, join_style=1).buffer(-r, join_style=1)
 
 
 def prism_xz(poly, y0, y1, xc=0.0, zc=0.0):
-    """Prisme : polygone dans le plan XZ, extrude selon Y de y0 a y1."""
     m = extrude_polygon(poly, y1 - y0)
-    m.apply_transform(rotation_matrix(-np.pi / 2, [1, 0, 0]))  # extrusion Z -> +Y, plan XY -> XZ
+    m.apply_transform(rotation_matrix(-np.pi / 2, [1, 0, 0]))
     m.apply_translation([xc, y0, zc])
     return m
 
@@ -84,19 +81,98 @@ def bbox(x0, x1, y0, y1, z0, z1):
     return tbox(extents=[x1 - x0, y1 - y0, z1 - z0], transform=translation_matrix(c))
 
 
-# ---------------- Construction ----------------
-body = prism_xz(rrect(body_x, body_z, R_OUT), 0.0, body_y, zc=body_z / 2)
-foot = prism_xy(rrect(body_x, FOOT_D + BACK, 8.0), 0.0, BOT, yc=(BACK - FOOT_D) / 2)
+def cyl_x(r, length, y, z):
+    c = cylinder(radius=r, height=length, sections=64)
+    c.apply_transform(rotation_matrix(np.pi / 2, [0, 1, 0]))
+    c.apply_translation([0, y, z])
+    return c
 
-solid = trimesh.boolean.union([body, foot], engine="manifold")
 
-cavity = bbox(-cav_x / 2, cav_x / 2, BACK, BACK + cav_y, BOT, BOT + cav_z)
-window = prism_xz(rrect(win_x, win_z, R_WIN), BACK + cav_y - 0.2, body_y + 1.0, zc=zc)
-cuts = [cavity, window]
-for c in (USB_CUT, BTN_CUT, MIC_R, MIC_T, CAM):
-    cuts.append(bbox(*c))
+def cyl_y(r, length, x, z, yc=0.0):
+    c = cylinder(radius=r, height=length, sections=64)
+    c.apply_transform(rotation_matrix(np.pi / 2, [1, 0, 0]))
+    c.apply_translation([x, yc, z])
+    return c
 
-mesh = trimesh.boolean.difference([solid] + cuts, engine="manifold")
+
+def rounded_box(sx, sy, sz, r, center):
+    cx, cy, cz = center
+    parts = [
+        bbox(cx - sx / 2 + r, cx + sx / 2 - r, cy - sy / 2 + r, cy + sy / 2 - r, cz - sz / 2 + r, cz + sz / 2 - r),
+        bbox(cx - sx / 2, cx + sx / 2, cy - sy / 2 + r, cy + sy / 2 - r, cz - sz / 2 + r, cz + sz / 2 - r),
+        bbox(cx - sx / 2 + r, cx + sx / 2 - r, cy - sy / 2, cy + sy / 2, cz - sz / 2 + r, cz + sz / 2 - r),
+        bbox(cx - sx / 2 + r, cx + sx / 2 - r, cy - sy / 2 + r, cy + sy / 2 - r, cz - sz / 2, cz + sz / 2),
+    ]
+    for yy in (-1, 1):
+        for zz in (-1, 1):
+            parts.append(cyl_x(r, sx - 2 * r, cy + yy * (sy / 2 - r), cz + zz * (sz / 2 - r)))
+    for xx in (-1, 1):
+        for zz in (-1, 1):
+            parts.append(cyl_y(r, sy - 2 * r, cx + xx * (sx / 2 - r), cz + zz * (sz / 2 - r), yc=cy))
+    for xx in (-1, 1):
+        for yy in (-1, 1):
+            c = cylinder(radius=r, height=sz - 2 * r, sections=64)
+            c.apply_translation([cx + xx * (sx / 2 - r), cy + yy * (sy / 2 - r), cz])
+            parts.append(c)
+    for xx in (-1, 1):
+        for yy in (-1, 1):
+            for zz in (-1, 1):
+                parts.append(icosphere(subdivisions=2, radius=r).apply_translation(
+                    [cx + xx * (sx / 2 - r), cy + yy * (sy / 2 - r), cz + zz * (sz / 2 - r)]))
+    return trimesh.boolean.union(parts, engine="manifold")
+
+
+# ---------------- Berceau (repere local, vertical) ----------------
+body = rounded_box(body_x, body_y, body_z, R_BODY, (0, body_y / 2, body_z / 2))
+col_xc = body_x / 2 - COL_W / 2
+cols = [prism_xy(rrect(COL_W, body_y, 4.0), ZB, body_z, xc=s * col_xc, yc=body_y / 2) for s in (-1, 1)]
+upper = trimesh.boolean.union([body] + cols, engine="manifold")
+
+cav_h = body_z + 1.0 - BOT                     # cavite ouverte en haut : Z = BOT..body_z+1
+win_h = body_z + 1.0 - (BOT + LIP)             # fenetre ouverte en haut : Z = BOT+LIP..body_z+1
+cuts = [
+    prism_xz(rrect(cav_x, cav_h, R_CAV), BACK, BACK + cav_y, zc=BOT + cav_h / 2),                      # cavite, coins arrondis comme le tel
+    prism_xz(rrect(win_x, win_h, R_WIN), BACK + cav_y - 0.2, body_y + 1.0, zc=BOT + LIP + win_h / 2),   # fenetre ecran
+    bbox(body_x / 2 - 5.0, body_x / 2 + 1.0, -1.0, body_y + 1.0, BOT, BOT + 48.0),                      # ouverture USB-C, paroi +X (gauche vue de l'ecran)
+    bbox(55.0, body_x / 2, -1.0, body_y + 1.0, -1.0, BOT + 1.0),                                        # canal pour le cable sous le telephone
+    bbox(-body_x / 2 + 1.0, -10.0, -1.0, body_y + 1.0, -1.0, BOT + 0.2),                                # logement boutons volume/power (paroi basse, cote -X)
+    bbox(-body_x / 2 - 1.0, -body_x / 2 + 5.0, -1.0, body_y + 1.0, zc - 4.0, zc + 4.0),                 # micro du bord superieur (paroi -X)
+    bbox(-cav_x / 2, -40.0, BACK - 2.6, BACK + 0.2, BOT, BOT + 16.0),                                   # poche capteurs photo, coin (-X, bas) du fond
+]
+upper = trimesh.boolean.difference([upper] + cuts, engine="manifold")
+
+# ---------------- Inclinaison + mise a hauteur ----------------
+rot = rotation_matrix(np.radians(TILT), [1, 0, 0], point=[0, 0, ZB])  # pivot a la base : le haut bascule vers l'arriere, la base reste au sol
+upper.apply_transform(rot)
+
+phone_local = prism_xz(rrect(PHONE_L, PHONE_W, R_PHONE), BACK + CLEAR, BACK + CLEAR + PHONE_T, zc=BOT + CLEAR + PHONE_W / 2)  # coins arrondis dans le plan de l'ecran
+phone_r = phone_local.copy()
+phone_r.apply_transform(rot)
+Tz = RAISE - phone_r.bounds[0][2]
+upper.apply_translation([0, 0, Tz])
+
+
+def to_world(m):
+    m2 = m.copy()
+    m2.apply_transform(rot)
+    m2.apply_translation([0, 0, Tz])
+    return m2
+
+
+phone_w = to_world(phone_local)
+
+# decoupe au niveau du sol (les colonnes atteignent le plateau a plat)
+upper = trimesh.boolean.difference([upper, bbox(-300, 300, -300, 300, -100, 0.0)], engine="manifold")
+
+# ---------------- Embase horizontale ----------------
+foot = prism_xy(rrect(body_x, FOOT_D + BACK + 1.0, 8.0), 0.0, BOT, xc=0.0, yc=(BACK + 1.0 - FOOT_D) / 2)
+foot_f = [
+    cyl_x(3.0, 2 * (body_x / 2 - 8.0), -FOOT_D + 3.0, BOT - 3.0),
+    cyl_y(3.0, FOOT_D - 8.0, -(body_x / 2 - 3.0), BOT - 3.0, yc=-(FOOT_D - 8.0) / 2),
+    cyl_y(3.0, FOOT_D - 8.0, +(body_x / 2 - 3.0), BOT - 3.0, yc=-(FOOT_D - 8.0) / 2),
+]
+
+mesh = trimesh.boolean.union([upper, foot] + foot_f, engine="manifold")
 mesh.merge_vertices()
 
 # ---------------- Validation ----------------
@@ -105,37 +181,18 @@ print("winding ok :", mesh.is_winding_consistent)
 print("corps      :", mesh.body_count)
 print("volume     : %.1f cm3" % (mesh.volume / 1000.0))
 print("dimensions : %.1f x %.1f x %.1f mm" % tuple(mesh.extents))
+print("inclinaison: %.0f deg vers l'arriere" % TILT)
+print("bas du tel au sol : %.2f mm" % phone_w.bounds[0][2])
 
-# Le telephone + ses boutons + une fiche USB doivent passer sans collision
 tests = {
-    "telephone": ([-PHONE_L / 2, PHONE_L / 2], [BACK + CLEAR, BACK + CLEAR + PHONE_T], [BOT + CLEAR, BOT + CLEAR + PHONE_W]),
-    "boutons":   ([15.0, 73.0], [BACK + CLEAR, BACK + CLEAR + PHONE_T], [BOT - 1.2, BOT + CLEAR]),
-    "fiche USB": ([-82.0, -PHONE_L / 2 + 0.15], [BACK + CLEAR, BACK + CLEAR + PHONE_T], [zc - 5.5, zc + 5.5]),
+    "telephone (coins r11)": phone_w,
+    "boutons":  to_world(bbox(-72.0, -20.0, BACK + CLEAR, BACK + CLEAR + PHONE_T, BOT - 1.2, BOT + CLEAR)),
+    "fiche USB": to_world(bbox(PHONE_L / 2 - 0.15, PHONE_L / 2 + 8.0, BACK + CLEAR, BACK + CLEAR + PHONE_T, zc - 6.0, zc + 6.0)),
+    "cable sous tel": to_world(bbox(58.0, 73.0, BACK + CLEAR, BACK + CLEAR + PHONE_T, 0.5, BOT - 0.5)),
 }
-for name, (xr, yr, zr) in tests.items():
-    t = bbox(xr[0], xr[1], yr[0], yr[1], zr[0], zr[1])
+for name, t in tests.items():
     inter = trimesh.boolean.intersection([mesh, t], engine="manifold")
-    print("collision %-10s : %.3f mm3 (attendu 0)" % (name, inter.volume if inter is not None else 0.0))
-
-# Tests de matiere ponctuels : volume d'intersection d'une petite sonde avec le support
-probes = {  # (centre, taille, volume attendu si plein)
-    "fenetre (vide)":        ((0, 15.0, zc), (10, 2, 10), 0),
-    "baguette basse (plein)": ((0, 15.0, BOT + 1.5), (10, 2, 3), 60),
-    "cavite (vide)":         ((0, 9.3, zc), (10, 2, 10), 0),
-    "fond (plein)":          ((0, 2.5, zc), (10, 2, 10), 200),
-    "paroi gauche (plein)":  ((-75.5, 9.0, 10.0), (2, 8, 8), 128),
-    "ouverture USB (vide)":  ((-75.5, 9.0, zc), (2, 8, 20), 0),
-    "logement boutons(vide)": ((30.0, 9.0, 3.0), (10, 8, 4), 0),
-    "paroi basse (plein)":   ((-40.0, 9.0, 3.0), (10, 8, 4), 320),
-    "embase (plein)":        ((0, -20.0, 3.0), (10, 8, 4), 320),
-    "poche capteurs(vide)":  ((60.0, 3.8, 14.0), (10, 1.5, 8), 0),
-}
-for name, (c, s, expect) in probes.items():
-    t = bbox(c[0] - s[0] / 2, c[0] + s[0] / 2, c[1] - s[1] / 2, c[1] + s[1] / 2, c[2] - s[2] / 2, c[2] + s[2] / 2)
-    inter = trimesh.boolean.intersection([mesh, t], engine="manifold")
-    v = inter.volume if inter is not None else 0.0
-    ok = "OK" if (v < 1e-6) == (expect == 0) else "ERREUR"
-    print("sonde %-24s : %.1f mm3 (attendu %s) %s" % (name, v, expect, ok))
+    print("collision %-20s : %.3f mm3 (attendu 0)" % (name, inter.volume if inter is not None else 0.0))
 
 # ---------------- Export STL ----------------
 out = "/workspace/support_s23_horizontal.stl"
@@ -150,7 +207,7 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 
 def render(meshes, path, views):
-    fig = plt.figure(figsize=(5.2 * len(views), 5.6))
+    fig = plt.figure(figsize=(5.2 * len(views), 6.0))
     for i, (title, elev, azim) in enumerate(views, 1):
         ax = fig.add_subplot(1, len(views), i, projection="3d")
         for m, color in meshes:
@@ -168,9 +225,8 @@ def render(meshes, path, views):
     plt.close(fig)
 
 
-phone = bbox(-PHONE_L / 2, PHONE_L / 2, BACK + CLEAR, BACK + CLEAR + PHONE_T, BOT + CLEAR, BOT + CLEAR + PHONE_W)
 render([(mesh, "#9fc3e8")], "/workspace/preview_ortho.png",
-       [("Face (ecran)", 0, 90), ("Dos", 0, -90), ("Gauche = USB-C", 0, 180), ("Dessus", 90, 90)])
-render([(mesh, "#9fc3e8"), (phone, "#e8c39f")], "/workspace/preview_iso.png",
-       [("Iso face+gauche, tel insere", 18, -125), ("Iso dos", 25, 55)])
+       [("Face ecran (USB a gauche)", 0, 90), ("Profil (inclinaison)", 0, 0), ("Paroi USB 3/4", 8, -30), ("Dos", 0, -90), ("Dessus", 90, 90)])
+render([(mesh, "#9fc3e8"), (phone_w, "#e8c39f")], "/workspace/preview_iso.png",
+       [("Iso face+USB, tel insere", 14, 55), ("Iso profil, tel insere", 4, 80), ("Iso dos", 20, 235)])
 print("apercus ecrits")
